@@ -13,7 +13,7 @@ Reemplaza los viejos scripts de consola por una pantalla fácil de usar.
 
 ## Cómo usarla
 
-1. Abrí la app (ver link abajo, o corréla en tu PC).
+1. Abrí la app: **https://ao-asset-manager.streamlit.app/** (o corréla en tu PC).
 2. Descargá el escáner `.bat` y ejecutalo dentro de tu carpeta de gráficos.
 3. Subí el `lista_graficos.txt` que se generó.
 4. Mirá los resultados en cada pestaña.
