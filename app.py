@@ -8,120 +8,70 @@ from PIL import Image
 # Configuración de página
 st.set_page_config(page_title="AO Asset Manager", page_icon="🛡️", layout="wide")
 
-# --- CSS PRO V4: SIMETRÍA PERFECTA ---
+# --- ESTILOS ---
 st.markdown("""
 <style>
-    /* === 1. MENÚ LATERAL === */
+    /* Menú lateral: opciones tipo botón, sin el circulito del radio */
     div[role="radiogroup"] > label > div:first-of-type { display: none !important; }
     div[role="radiogroup"] label {
-        padding: 12px 20px; margin-bottom: 4px; border-radius: 8px; border: none;
+        padding: 10px 16px; margin-bottom: 4px; border-radius: 8px;
         transition: background-color 0.2s; cursor: pointer;
     }
-    div[role="radiogroup"] label:hover { background-color: rgba(150, 150, 150, 0.1); }
+    div[role="radiogroup"] label:hover { background-color: rgba(255, 75, 75, 0.12); }
     div[role="radiogroup"] label p { font-size: 15px !important; font-weight: 500 !important; margin: 0; }
-    hr { margin: 15px 0; border-color: #333; }
 
-    /* === 2. TARJETAS DEL PASO 1 (PIXEL PERFECT) === */
-    
-    /* CAJA SUPERIOR (TEXTO) - IDÉNTICA PARA LOS 3 */
-    .card-top {
-        background-color: #262730;
-        border: 1px solid #464b5c;
-        border-bottom: none; /* Se une con la parte de abajo */
-        border-radius: 10px 10px 0 0;
-        padding: 20px;
-        text-align: center;
-        height: 220px; /* ALTURA FIJA PARA ALINEACIÓN PERFECTA */
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
+    /* Cabecera de cada pantalla */
+    .hero {
+        padding: 22px 26px; border-radius: 14px; margin-bottom: 18px;
+        background: linear-gradient(135deg, rgba(255,75,75,0.18), rgba(100,120,255,0.10));
+        border: 1px solid rgba(255,255,255,0.08);
     }
-    
-    .s-num { font-size: 40px; font-weight: 800; color: #ff4b4b; margin-bottom: 5px; line-height: 1; }
-    .s-title { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 10px; }
-    .s-text { font-size: 14px; color: #b0b0b0; line-height: 1.4; }
+    .hero h1 { margin: 0 0 6px 0; font-size: 30px; }
+    .hero p { margin: 0; color: #c8c8d0; font-size: 15px; line-height: 1.5; }
 
-    /* CAJA INFERIOR (ACCIÓN) - BASE */
-    .card-bottom {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 50px;
-        width: 100%;
-        border-radius: 0 0 10px 10px;
-        font-weight: 600;
-        font-size: 14px;
-        border: 1px solid #464b5c;
-        border-top: none;
+    /* Número de paso */
+    .step-badge {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 50%;
+        background: #ff4b4b; color: white; font-weight: 800; font-size: 17px;
+        margin-bottom: 8px;
     }
-
-    /* ESTILOS ESPECÍFICOS PARA LOS "BOTONES FALSOS" (Col 2 y 3) */
-    .fake-btn-blue { background-color: rgba(33, 150, 243, 0.1); color: #64B5F6; border-top: 1px solid #464b5c; }
-    .fake-btn-green { background-color: rgba(76, 175, 80, 0.1); color: #81C784; border-top: 1px solid #464b5c; }
-
-    /* === HACK CRÍTICO: FORZAR AL BOTÓN DE STREAMLIT (Col 1) A SER IGUAL === */
-    /* Apuntamos al botón dentro de la primera columna */
-    [data-testid="column"]:nth-of-type(1) .stDownloadButton button {
-        width: 100%;
-        height: 50px;
-        border-radius: 0 0 10px 10px !important;
-        border: 1px solid #464b5c !important;
-        border-top: none !important;
-        margin: 0 !important;
-        background-color: #ff4b4b; /* Color rojo del botón */
-        color: white;
-    }
-    /* Quitamos el hover default feo y ponemos uno sutil */
-    [data-testid="column"]:nth-of-type(1) .stDownloadButton button:hover {
-        border-color: #ff4b4b !important;
-        background-color: #ff2b2b !important;
-        color: white !important;
-    }
-    
-    /* Eliminar el espacio vacío que deja Streamlit entre el HTML y el botón */
-    [data-testid="column"]:nth-of-type(1) .stMarkdown { margin-bottom: -15px !important; }
-
+    .big-num { font-size: 34px; font-weight: 800; color: #ff4b4b; line-height: 1.1; }
+    .muted { color: #9a9aa5; font-size: 13px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CABECERA ---
-st.title("🛡️ Panel de Control - Arcanus Online")
-st.markdown("---")
 
-# --- LÓGICA ---
 # --- LÓGICA / PARSERS ---
 
 @st.cache_data
-def parse_ind_data(file_content):
+def parse_ind_data(content_bytes):
     """
-    Parsea un archivo index (Graficos.ini/ind) y devuelve dos sets:
+    Parsea un archivo index (Graficos.ini) y devuelve dos sets:
     1. needed_files: Números de archivo (.png) que se requieren (Grh de 1 frame).
     2. used_grhs: Todos los índices GrhXXX que están ocupados.
     """
     needed_files = set()
     used_grhs = set()
-    
-    # Reset del puntero por si acaso
-    file_content.seek(0)
-    content = file_content.getvalue().decode("utf-8", errors="ignore")
-    
+
+    content = content_bytes.decode("utf-8", errors="ignore")
+
     # Regex para capturar "GrhXXXX ="
     regex_grh = re.compile(r'^\s*Grh(\d+)\s*=\s*(.+)$', re.IGNORECASE)
-    
+
     for line in content.splitlines():
         line = line.strip()
         match = regex_grh.match(line)
         if not match:
             continue
-            
+
         grh_id = int(match.group(1))
         used_grhs.add(grh_id)
-        
+
         # Analizar si apunta a un archivo gráfico
         data_part = match.group(2)
         tokens = data_part.split("-")
-        
+
         try:
             num_frames = int(tokens[0])
             # Si es de 1 frame, el segundo token es el ID del archivo
@@ -131,204 +81,326 @@ def parse_ind_data(file_content):
                     needed_files.add(file_num)
         except ValueError:
             continue
-            
+
     return needed_files, used_grhs
 
 @st.cache_data
-def parse_disk_files(file_content):
+def parse_disk_files(content_bytes):
     """Lee lista_graficos.txt y devuelve set de IDs encontrados."""
-    file_content.seek(0)
-    content = file_content.getvalue().decode("utf-8", errors="ignore")
+    content = content_bytes.decode("utf-8", errors="ignore")
     found_ids = set()
     regex_file = re.compile(r'^(\d+)\.(png|bmp|jpg|jpeg)$', re.IGNORECASE)
-    
+
     for line in content.splitlines():
         clean_line = line.strip()
         match = regex_file.match(clean_line)
         if match:
             found_ids.add(int(match.group(1)))
-            
+
     return found_ids
 
 def get_bat_script():
     script = "@echo off\r\necho Generando lista de graficos...\r\ndir /b *.png *.bmp > lista_graficos.txt\r\necho LISTO! Se creo 'lista_graficos.txt'. Ahora subelo a la web.\r\npause\r\n"
     return script.encode('utf-8')
 
-# --- MENÚ LATERAL ---
-st.sidebar.subheader("Navegación")
-opciones = {
-    "Paso 1": "📁  Conectar Carpeta",
-    "Diagnóstico": "🚑  Diagnóstico de Salud", 
-    "Asistente": "➕  Nuevo Gráfico",
-    "Procesador": "🎨  Estudio Gráfico",
-    "Editor": "⚔️  Editor de Objetos"
-}
-mode = st.sidebar.radio("Ir a:", list(opciones.values()), label_visibility="collapsed")
 
-# --- VISTA 1: CONEXIÓN ---
-if mode == opciones["Paso 1"]:
-    st.header("Paso 1: Conexión Local")
-    st.caption("Por seguridad, la web no ve tus archivos. Sigue estos 3 pasos para conectarla.")
-    st.markdown("<br>", unsafe_allow_html=True)
+# --- COMPONENTES DE UI ---
+
+def hero(title, description):
+    st.markdown(f'<div class="hero"><h1>{title}</h1><p>{description}</p></div>', unsafe_allow_html=True)
+
+def file_slot(key, label, types, help_text):
+    """
+    Cargador de archivos que RECUERDA el archivo entre pantallas:
+    se sube una sola vez y sirve para todas las herramientas.
+    Devuelve los bytes del archivo o None.
+    """
+    stored = st.session_state.get(key)
+    if stored:
+        c1, c2 = st.columns([4, 1])
+        c1.success(f"✅ **{label}** — {stored['name']}")
+        if c2.button("Cambiar", key=f"{key}_change", use_container_width=True):
+            del st.session_state[key]
+            st.rerun()
+        return stored["data"]
+
+    uploaded = st.file_uploader(label, type=types, key=f"{key}_up", help=help_text)
+    if uploaded:
+        st.session_state[key] = {"name": uploaded.name, "data": uploaded.getvalue()}
+        st.rerun()
+    return None
+
+def go_to(page):
+    st.session_state.nav = page
+
+
+# --- MENÚ LATERAL ---
+PAGES = {
+    "inicio": "🏠  Inicio",
+    "escaner": "📁  1. Escanear carpeta",
+    "diag": "🚑  2. Diagnóstico",
+    "nuevo": "➕  3. Números libres",
+    "estudio": "🎨  4. Estudio gráfico",
+    "editor": "⚔️  5. Editor de objetos",
+}
+if "nav" not in st.session_state:
+    st.session_state.nav = PAGES["inicio"]
+
+st.sidebar.markdown("### 🛡️ AO Asset Manager")
+st.sidebar.caption("Herramientas para Arcanus Online")
+mode = st.sidebar.radio("Ir a:", list(PAGES.values()), key="nav", label_visibility="collapsed")
+
+
+# --- INICIO ---
+if mode == PAGES["inicio"]:
+    hero("🛡️ AO Asset Manager",
+         "Revisá y ordená los gráficos y objetos de <b>Arcanus Online</b> sin instalar nada. "
+         "Elegí qué querés hacer:")
+
+    st.info("**¿Primera vez?** Empezá por **1. Escanear carpeta**. "
+            "Es un paso de 1 minuto que te deja usar el Diagnóstico y los Números libres. "
+            "Las herramientas 4 y 5 no lo necesitan.")
+
+    tools = [
+        ("escaner", "📁", "1. Escanear carpeta",
+         "Genera la lista de gráficos que tenés en tu PC.",
+         "Descargás un mini programa (.bat), lo ejecutás en tu carpeta de gráficos y obtenés un `lista_graficos.txt`.",
+         "Nada"),
+        ("diag", "🚑", "2. Diagnóstico",
+         "Detecta gráficos que faltan (el juego se puede cerrar) y archivos que sobran.",
+         "Compara tu carpeta contra el índice de gráficos.",
+         "`Graficos.ini` + `lista_graficos.txt`"),
+        ("nuevo", "➕", "3. Números libres",
+         "Te dice qué número usar para agregar un ítem o NPC nuevo sin pisar nada existente.",
+         "Busca huecos en un rango y te arma la línea lista para pegar.",
+         "`Graficos.ini` + `lista_graficos.txt`"),
+        ("estudio", "🎨", "4. Estudio gráfico",
+         "Convierte imágenes BMP a PNG y vuelve transparente el fondo negro.",
+         "Subís varias imágenes y bajás un ZIP con todo procesado.",
+         "Tus imágenes"),
+        ("editor", "⚔️", "5. Editor de objetos",
+         "Editá ítems de `OBJ.DAT` (nombre, daño, defensa, precio…) con formularios.",
+         "Mantiene el formato original del archivo al guardar.",
+         "`OBJ.DAT`"),
+    ]
+
+    for row in (tools[:3], tools[3:]):
+        cols = st.columns(3)
+        for col, (pid, icon, title, what, how, needs) in zip(cols, row):
+            with col.container(border=True):
+                st.markdown(f"#### {icon} {title}")
+                st.write(what)
+                st.caption(how)
+                st.caption(f"**Necesitás:** {needs}")
+                st.button("Abrir →", key=f"home_{pid}", on_click=go_to, args=(PAGES[pid],),
+                          use_container_width=True)
+
+    with st.expander("❓ Glosario: ¿qué es cada cosa?"):
+        st.markdown("""
+- **Graficos.ini**: archivo de texto del cliente que lista cada gráfico con líneas tipo `Grh1=1-1-0-0-32-32`.
+- **Grh**: el "número de código" de un gráfico. Los ítems y NPCs apuntan a un Grh.
+- **Número de archivo (.png)**: el nombre de la imagen en tu carpeta (ej: `15001.png`). Cada Grh de 1 frame apunta a una imagen.
+- **Huérfano**: imagen que está en tu carpeta pero ningún Grh usa. Ocupa espacio sin servir.
+- **OBJ.DAT**: archivo del servidor con todos los objetos del juego.
+""")
+
+
+# --- 1. ESCANEAR CARPETA ---
+elif mode == PAGES["escaner"]:
+    hero("📁 1. Escanear carpeta",
+         "Por seguridad, una página web <b>no puede ver tus archivos</b>. "
+         "Con este mini programa generás una lista con los nombres de tus gráficos "
+         "y la subís: <b>las imágenes nunca salen de tu PC</b>.")
 
     col1, col2, col3 = st.columns(3)
 
-    # --- TARJETA 1 (Descargar) ---
-    with col1:
-        st.markdown("""
-        <div class="card-top">
-            <div class="s-num">1</div>
-            <div class="s-title">Descargar</div>
-            <div class="s-text">Baja el "Escáner" (.bat).<br>Es un archivo seguro de 1kb.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        # El botón nativo de Streamlit, hackeado por CSS para parecer el footer
-        st.download_button(
-            label="⬇️ DESCARGAR .BAT",
-            data=get_bat_script(),
-            file_name="escanear_mis_graficos.bat",
-            mime="text/plain",
-            use_container_width=True
-        )
+    with col1.container(border=True):
+        st.markdown('<div class="step-badge">1</div>', unsafe_allow_html=True)
+        st.markdown("**Descargá el escáner**")
+        st.caption("Es un archivo `.bat` de pocas líneas. Podés abrirlo con el Bloc de notas para verlo.")
+        st.download_button("⬇️ Descargar escáner (.bat)", data=get_bat_script(),
+                           file_name="escanear_mis_graficos.bat", mime="text/plain",
+                           type="primary", use_container_width=True)
 
-    # --- TARJETA 2 (Ejecutar) ---
-    with col2:
-        st.markdown("""
-        <div class="card-top">
-            <div class="s-num">2</div>
-            <div class="s-title">Ejecutar</div>
-            <div class="s-text">Pégalo en tu carpeta <b>GRAFICOS</b><br>y dale doble clic.</div>
-        </div>
-        <div class="card-bottom fake-btn-blue">
-            📄 Se creará: lista_graficos.txt
-        </div>
-        """, unsafe_allow_html=True)
+    with col2.container(border=True):
+        st.markdown('<div class="step-badge">2</div>', unsafe_allow_html=True)
+        st.markdown("**Ejecutalo en tu carpeta**")
+        st.caption("Copiá el `.bat` dentro de tu carpeta de gráficos (donde están los .png) y hacé doble clic.")
+        st.info("📄 Se crea `lista_graficos.txt`")
 
-    # --- TARJETA 3 (Subir) ---
-    with col3:
-        st.markdown("""
-        <div class="card-top">
-            <div class="s-num">3</div>
-            <div class="s-title">Subir</div>
-            <div class="s-text">Ve a las otras secciones<br>y sube ese archivo de texto.</div>
-        </div>
-        <div class="card-bottom fake-btn-green">
-            ✅ ¡Ya puedes navegar!
-        </div>
-        """, unsafe_allow_html=True)
+    with col3.container(border=True):
+        st.markdown('<div class="step-badge">3</div>', unsafe_allow_html=True)
+        st.markdown("**Subí la lista**")
+        st.caption("Subila acá o directamente en Diagnóstico / Números libres. Se recuerda en todas las pantallas.")
 
-# --- VISTA 2: DIAGNÓSTICO ---
-elif mode == opciones["Diagnóstico"]:
-    st.header("🚑 Diagnóstico de Salud")
-    st.write("Detecta errores críticos y limpia tu carpeta.")
-    
-    with st.expander("📂 Cargar Archivos (Clic para desplegar)", expanded=True):
-        c1, c2 = st.columns(2)
-        ind_file = c1.file_uploader("1. Graficos.ini / .txt", type=["ini", "txt"], key="diag_ind")
-        list_file = c2.file_uploader("2. lista_graficos.txt", type=["txt"], key="diag_list")
+    st.markdown("##### Subir `lista_graficos.txt`")
+    lista = file_slot("list_file", "lista_graficos.txt", ["txt"],
+                      "El archivo que generó el escáner en tu carpeta de gráficos.")
+    if lista:
+        ids = parse_disk_files(lista)
+        st.metric("Imágenes detectadas", len(ids))
+        if not ids:
+            st.warning("No se detectaron imágenes. Los nombres deben ser numéricos (ej: `1234.png`).")
+        else:
+            st.success("¡Listo! Ya podés ir a **2. Diagnóstico** o **3. Números libres**.")
+            c1, c2 = st.columns(2)
+            c1.button("🚑 Ir a Diagnóstico", on_click=go_to, args=(PAGES["diag"],), use_container_width=True)
+            c2.button("➕ Ir a Números libres", on_click=go_to, args=(PAGES["nuevo"],), use_container_width=True)
 
-    if ind_file and list_file:
-        needed, _ = parse_ind_data(ind_file) 
-        disk = parse_disk_files(list_file)        
-        missing = sorted(needed - disk)     
-        orphans = sorted(disk - needed)     
-        
+
+# --- 2. DIAGNÓSTICO ---
+elif mode == PAGES["diag"]:
+    hero("🚑 2. Diagnóstico de salud",
+         "Compara los gráficos que <b>tu carpeta tiene</b> contra los que <b>el índice pide</b>. "
+         "Te avisa qué falta (puede cerrar el juego) y qué sobra (ocupa lugar sin usarse).")
+
+    st.markdown("##### Archivos necesarios")
+    c1, c2 = st.columns(2)
+    with c1:
+        ind = file_slot("ind_file", "Graficos.ini", ["ini", "txt", "ind"],
+                        "El índice de gráficos del cliente (texto con líneas Grh1=...).")
+    with c2:
+        lst = file_slot("list_file", "lista_graficos.txt", ["txt"],
+                        "Generado en el paso 1 (Escanear carpeta).")
+
+    if not (ind and lst):
+        st.info("👆 Subí los dos archivos para ver el resultado. "
+                "Si no tenés `lista_graficos.txt`, andá a **1. Escanear carpeta**.")
+    else:
+        needed, _ = parse_ind_data(ind)
+        disk = parse_disk_files(lst)
+        missing = sorted(needed - disk)
+        orphans = sorted(disk - needed)
+
         st.divider()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Gráficos que pide el índice", len(needed))
+        m2.metric("Imágenes en tu carpeta", len(disk))
+        m3.metric("Problemas encontrados", len(missing) + len(orphans))
+
         col_miss, col_clean = st.columns(2)
-        
+
         with col_miss:
-            st.error(f"⛔ Faltan {len(missing)} archivos")
+            st.subheader("⛔ Faltantes")
+            st.caption("El índice las pide pero no están en tu carpeta. **Es lo urgente**: pueden cerrar el juego.")
             if missing:
+                st.error(f"Faltan {len(missing)} archivos")
                 text_missing = "\n".join(f"{x}.png" for x in missing)
-                st.text_area("Ver lista:", text_missing, height=200)
-                st.download_button("⬇️ Descargar Reporte Faltantes", text_missing, "faltantes.txt")
+                st.text_area("Lista:", text_missing, height=200, key="ta_missing")
+                st.download_button("⬇️ Descargar lista de faltantes", text_missing, "faltantes.txt")
             else:
-                st.caption("¡No falta nada! El cliente cargará perfecto.")
+                st.success("¡No falta nada! El cliente va a cargar bien.")
 
         with col_clean:
-            st.warning(f"🧹 Sobran {len(orphans)} archivos")
+            st.subheader("🧹 Huérfanos")
+            st.caption("Están en tu carpeta pero ningún gráfico los usa. Podés borrarlos para ahorrar espacio (opcional).")
             if orphans:
+                st.warning(f"Sobran {len(orphans)} archivos")
                 text_orphans = "\n".join(f"{x}.png" for x in orphans)
-                with st.expander("Ver lista de basura"):
-                    st.text_area("", text_orphans, height=150, label_visibility="collapsed")
-                st.download_button("⬇️ Descargar Reporte Huérfanos", text_orphans, "huerfanos.txt")
+                st.text_area("Lista:", text_orphans, height=200, key="ta_orphans")
+                st.download_button("⬇️ Descargar lista de huérfanos", text_orphans, "huerfanos.txt")
             else:
-                st.caption("Carpeta optimizada al 100%.")
+                st.success("Carpeta optimizada al 100%.")
 
-# --- VISTA 3: ASISTENTE ---
-elif mode == opciones["Asistente"]:
-    st.header("➕ Agregar Nuevo Gráfico")
-    st.write("Encuentra IDs libres para nuevos ítems.")
+        st.caption("ℹ️ Solo se revisan gráficos de 1 frame. Las animaciones usan otros Grh y no se verifican acá.")
 
-    with st.expander("📂 Cargar Archivos", expanded=True):
-        c1, c2 = st.columns(2)
-        ind_file = c1.file_uploader("Graficos.ini (Para código)", type=["ini", "txt", "ind"], key="assist_ind")
-        list_file = c2.file_uploader("lista_graficos.txt (Para imagen)", type=["txt"], key="assist_list")
 
-    st.markdown("##### Rango de Búsqueda")
-    rc1, rc2 = st.columns(2)
-    min_val = rc1.number_input("Desde:", value=15000, step=100)
-    max_val = rc2.number_input("Hasta:", value=20000, step=100)
-    
-    full_range = set(range(min_val, max_val + 1))
-    
-    if list_file or ind_file:
-        st.divider()
-        res1, res2 = st.columns(2)
+# --- 3. NÚMEROS LIBRES ---
+elif mode == PAGES["nuevo"]:
+    hero("➕ 3. Números libres",
+         "¿Vas a agregar un ítem o NPC nuevo? Acá encontrás un <b>número de imagen</b> y un "
+         "<b>número de Grh</b> que nadie esté usando, así no pisás nada existente.")
 
-        with res1:
-            st.subheader("Para la Imagen (.png)")
-            if list_file:
-                disk = parse_disk_files(list_file)
-                free = sorted(list(full_range - disk))
-                if free:
-                    st.success(f"Disponible: **{free[0]}.png**")
-                    st.caption(f"Y otros {len(free)-1} libres...")
-                else:
-                    st.error("Sin espacio en disco.")
-            else:
-                st.info("Sube la lista.txt")
-        
-        with res2:
-            st.subheader("Para el Código (Grh)")
-            if ind_file:
-                _, used_grhs = parse_ind_data(ind_file)
-                
-                free_grhs = sorted(list(full_range - used_grhs))
-                if free_grhs:
-                    st.success(f"Disponible: **Grh{free_grhs[0]}**")
-                    st.caption(f"Y otros {len(free_grhs)-1} libres...")
-                    
-                    st.markdown("---")
-                    st.markdown("**Generador Rápido:**")
-                    frames = st.number_input("Frames:", 1, 10, 1, key="gen_frames")
-                    if frames == 1 and list_file:
-                        # Sugerir mapeo directo si hay slots libres
-                        st.code(f"Grh{free_grhs[0]}=1-{free_grhs[0]}-0-0-0-0", language="ini")
-                else:
-                    st.error("Sin espacio en índice.")
-            else:
-                st.info("Sube Graficos.ini")
+    st.markdown("##### Archivos necesarios")
+    c1, c2 = st.columns(2)
+    with c1:
+        ind = file_slot("ind_file", "Graficos.ini", ["ini", "txt", "ind"],
+                        "Sirve para saber qué números de Grh ya están ocupados.")
+    with c2:
+        lst = file_slot("list_file", "lista_graficos.txt", ["txt"],
+                        "Sirve para saber qué imágenes (.png) ya existen.")
+
+    st.markdown("##### ¿En qué rango buscar?")
+    st.caption("Elegí una zona del índice reservada para tus gráficos nuevos (ej: del 15000 al 20000).")
+    rc1, rc2, rc3 = st.columns(3)
+    min_val = rc1.number_input("Desde:", value=15000, step=100, min_value=1)
+    max_val = rc2.number_input("Hasta:", value=20000, step=100, min_value=1)
+    qty = rc3.number_input("¿Cuántos necesitás?", value=1, min_value=1, max_value=200,
+                           help="Cantidad de números libres que querés que te liste.")
+
+    if max_val < min_val:
+        st.error("El valor de «Hasta» debe ser mayor que «Desde».")
+    elif not (ind and lst):
+        st.info("👆 Subí los dos archivos para obtener el número recomendado.")
     else:
-        st.info("Carga tus archivos arriba para empezar a buscar.")
+        full_range = set(range(int(min_val), int(max_val) + 1))
+        disk = parse_disk_files(lst)
+        _, used_grhs = parse_ind_data(ind)
 
-# --- VISTA 4: PROCESADOR DE IMÁGENES ---
-elif mode == opciones.get("Procesador", ""): # Usamos .get por si no se ha definido aún en el diccionario
-    st.header("🎨 Estudio Gráfico")
-    st.write("Convierte BMPs a PNG y elimina fondos negros automáticamente.")
-    
+        free_files = sorted(full_range - disk)
+        free_grhs = sorted(full_range - used_grhs)
+        free_both = sorted(full_range - disk - used_grhs)
+
+        st.divider()
+
+        st.subheader("⭐ Recomendado")
+        if free_both:
+            chosen = free_both[:int(qty)]
+            st.success(f"Usá el número **{chosen[0]}**: la imagen `{chosen[0]}.png` "
+                       f"y `Grh{chosen[0]}` están libres a la vez.")
+            st.caption("Así el nombre de la imagen y el Grh coinciden y es más fácil de mantener.")
+            lines = "\n".join(f"Grh{n}=1-{n}-0-0-32-32" for n in chosen)
+            st.markdown("**Línea(s) para pegar en `Graficos.ini`:**")
+            st.code(lines, language="ini")
+            st.caption("Formato: `Grh = frames - nº de imagen - X - Y - ancho - alto`. "
+                       "Cambiá `32-32` por el ancho y alto reales de tu imagen.")
+            if len(chosen) < int(qty):
+                st.warning(f"Solo hay {len(chosen)} números libres en este rango (pediste {int(qty)}).")
+        else:
+            st.error("No hay ningún número libre para ambos en este rango. Probá ampliarlo.")
+
+        with st.expander("Ver por separado (imagen / Grh)"):
+            r1, r2 = st.columns(2)
+            with r1:
+                st.markdown("**🖼️ Imágenes libres (.png)**")
+                if free_files:
+                    st.write(f"Primera libre: `{free_files[0]}.png` — {len(free_files)} libres en total")
+                    st.code(", ".join(str(n) for n in free_files[:int(qty) + 9]))
+                else:
+                    st.error("Sin espacio en este rango.")
+            with r2:
+                st.markdown("**🔢 Grh libres**")
+                if free_grhs:
+                    st.write(f"Primero libre: `Grh{free_grhs[0]}` — {len(free_grhs)} libres en total")
+                    st.code(", ".join(str(n) for n in free_grhs[:int(qty) + 9]))
+                else:
+                    st.error("Sin espacio en este rango.")
+
+# --- 4. ESTUDIO GRÁFICO ---
+elif mode == PAGES["estudio"]:
+    hero("🎨 4. Estudio gráfico",
+         "Convierte imágenes <b>BMP a PNG</b> y vuelve <b>transparente el fondo negro</b>, todo de una vez. "
+         "No necesitás ningún otro archivo: las imágenes se procesan en el momento y no se guardan.")
+
+    st.markdown("**Cómo se usa:** ① subí tus imágenes → ② ajustá la tolerancia → ③ tocá *Procesar* → ④ bajá el ZIP.")
+
     with st.form("procesador_form"):
         uploaded_files = st.file_uploader(
-            "Arrastra tus imágenes (BMP o PNG)", 
-            type=["bmp", "png"], 
+            "① Arrastrá tus imágenes (BMP o PNG)",
+            type=["bmp", "png"],
             accept_multiple_files=True
         )
-        
+
         c1, c2 = st.columns(2)
-        tolerance = c1.slider("Tolerancia de Negro (0 = Negro Puro)", 0, 150, 10, help="Sube esto si quedan bordes oscuros feos.")
-        keep_original = c2.checkbox("Mantener nombre original", value=True, help="Si no, se agrega '_processed' al nombre.")
-        
-        submitted = st.form_submit_button("🔨 Procesar Imágenes")
+        tolerance = c1.slider("② Tolerancia de negro (0 = solo negro puro)", 0, 150, 10,
+                              help="Todo píxel 'casi negro' hasta este valor se vuelve transparente. Empezá con 10 y subilo si te quedan bordes oscuros.")
+        keep_original = c2.checkbox("Mantener nombre original", value=True,
+                                    help="Si lo desmarcás, se agrega '_processed' al nombre del archivo.")
+
+        submitted = st.form_submit_button("③ 🔨 Procesar imágenes", type="primary")
+
+    if submitted and not uploaded_files:
+        st.warning("Primero subí al menos una imagen.")
         
     if submitted and uploaded_files:
         progress_bar = st.progress(0)
@@ -386,9 +458,13 @@ elif mode == opciones.get("Procesador", ""): # Usamos .get por si no se ha defin
         )
 
 # --- VISTA 5: EDITOR DE OBJETOS ---
-elif mode == opciones.get("Editor", ""):
-    st.header("⚔️ Editor de Objetos (OBJ.DAT)")
-    st.markdown("Herramienta avanzada para manipular `OBJ.DAT` respetando el formato original.")
+elif mode == PAGES["editor"]:
+    hero("⚔️ 5. Editor de objetos",
+         "Editá los ítems de tu <b>OBJ.DAT</b> con formularios en vez de a mano. "
+         "Al guardar se respeta el formato original del archivo.")
+    st.markdown("**Cómo se usa:** ① subí tu `OBJ.DAT` → ② elegí un objeto → ③ cambiá sus datos y tocá *Guardar* → "
+                "④ cuando termines, tocá *Descargar OBJ.DAT*.")
+    st.caption("⚠️ Los cambios viven solo en esta sesión del navegador. Si recargás la página sin descargar, se pierden.")
 
     # --- HELPERS ---
     OBJ_TYPES = {
@@ -414,12 +490,13 @@ elif mode == opciones.get("Editor", ""):
     # --- SIDEBAR ACTIONS ---
     with st.sidebar:
         st.divider()
-        st.subheader("Acciones Rápidas")
+        st.subheader("Acciones rápidas")
+        st.caption("Disponibles al cargar tu OBJ.DAT." if not st.session_state.obj_data else "Atajos para el editor de objetos.")
         if st.session_state.obj_data:
             objs = st.session_state.obj_data
             
             # 1. Buscar Libre
-            if st.button("🔍 Buscar ID Libre"):
+            if st.button("🔍 Buscar ID libre", help="Muestra el primer ID de objeto sin usar."):
                 existing_ids = sorted(objs.keys())
                 # Buscar el primer hueco
                 free_id = 1
@@ -431,7 +508,7 @@ elif mode == opciones.get("Editor", ""):
                 st.info(f"ID Disponible: {free_id}")
             
             # 2. Crear Nuevo
-            if st.button("✨ Crear Nuevo Objeto"):
+            if st.button("✨ Crear nuevo objeto", help="Agrega un objeto vacío con el primer ID libre. Después buscalo en el selector y completá sus datos."):
                 existing_ids = sorted(objs.keys())
                 free_id = 1
                 for oid in existing_ids:
@@ -452,7 +529,16 @@ elif mode == opciones.get("Editor", ""):
                 st.rerun()
 
     # --- MAIN UI ---
-    uploaded_obj = st.file_uploader("Sube tu OBJ.DAT", type=["dat", "txt"])
+    if st.session_state.obj_data is None:
+        uploaded_obj = st.file_uploader("① Subí tu OBJ.DAT", type=["dat", "txt"])
+    else:
+        uploaded_obj = None
+        info_c, reset_c = st.columns([4, 1])
+        info_c.success(f"✅ OBJ.DAT cargado ({len(st.session_state.obj_data)} objetos)")
+        if reset_c.button("Cargar otro archivo", use_container_width=True):
+            st.session_state.obj_data = None
+            st.session_state.obj_handler = None
+            st.rerun()
 
     if uploaded_obj and st.session_state.obj_data is None:
         handler = ObjDatHandler()
@@ -481,18 +567,21 @@ elif mode == opciones.get("Editor", ""):
                 dtype = OBJ_TYPES.get(otype, "Desconocido")
                 return f"{oid} - {o.get('Name', 'Sin Nombre')} [{dtype}]"
 
-            selected_id = st.selectbox("Seleccionar Objeto", opts, format_func=format_func)
+            selected_id = st.selectbox("② Elegí el objeto a editar (escribí para buscar por ID o nombre)", opts, format_func=format_func)
             current_obj = objs[selected_id]
 
         with col_save:
             st.write("") # Spacer
-            if st.button("💾 Descargar OBJ.DAT", type="primary"):
-                st.download_button(
-                    "📥 Click para bajar",
-                    data=handler.write(),
-                    file_name="OBJ.DAT",
-                    mime="application/octet-stream"
-                )
+            st.write("")
+            st.download_button(
+                "💾 Descargar OBJ.DAT",
+                data=handler.write(),
+                file_name="OBJ.DAT",
+                mime="application/octet-stream",
+                type="primary",
+                use_container_width=True,
+                help="Baja el archivo con todos tus cambios guardados."
+            )
 
         # --- EDITOR FORM ---
         st.divider()
@@ -537,11 +626,9 @@ elif mode == opciones.get("Editor", ""):
                 c5, c6 = st.columns(2)
                 new_apunala = c5.number_input("Apuñala (Apuñala)", value=int(current_obj.get("Apuñala", 0)))
                 # Proyectil / Municiones unificado visualmente, separado al guardar
-                new_proyectil = c6.number_input("Proyectil/Munición ID", value=int(current_obj.get("Proyectil", current_obj.get("Municiones", 0))))
+                new_proyectil = c6.number_input("Proyectil/Munición ID (solo Arco o Munición)", value=int(current_obj.get("Proyectil", current_obj.get("Municiones", 0))))
 
-                c7, c8 = st.columns(2)
-                new_envenena = c7.number_input("Envenena (0/1)", value=int(current_obj.get("Envenena", 0)))
-                new_paraliza = c8.number_input("Paraliza (0/1) [Si aplica]", value=int(current_obj.get("Paraliza", 0)))
+                new_envenena = st.number_input("Envenena (0 = no, 1 = sí)", value=int(current_obj.get("Envenena", 0)))
                 
                 st.caption("Pociones / Modificadores")
                 p1, p2, p3 = st.columns(3)
