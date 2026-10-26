@@ -104,6 +104,76 @@ def get_bat_script():
     return script.encode('utf-8')
 
 
+@st.cache_data
+def analyze_grh_index(content_bytes):
+    """
+    Analiza el índice completo. Devuelve (grhs, malformed):
+    - grhs: {id: {"kind": "static", "file": N} | {"kind": "anim", "frames": n, "children": [ids]}}
+    - malformed: líneas Grh que no se pudieron interpretar.
+    Formato estático:   GrhN=1-archivo-x-y-ancho-alto
+    Formato animación:  GrhN=frames-Grh1-Grh2-...-velocidad
+    """
+    grhs = {}
+    malformed = []
+    regex_grh = re.compile(r'^\s*Grh(\d+)\s*=\s*(.+)$', re.IGNORECASE)
+
+    for line in content_bytes.decode("utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        match = regex_grh.match(line)
+        if not match:
+            continue
+        gid = int(match.group(1))
+        tokens = match.group(2).split("-")
+        try:
+            frames = int(tokens[0])
+            if frames == 1:
+                grhs[gid] = {"kind": "static", "file": int(tokens[1])}
+            elif frames > 1:
+                float(tokens[-1])  # la última parte es la velocidad
+                children = [int(t) for t in tokens[1:-1]]
+                grhs[gid] = {"kind": "anim", "frames": frames, "children": children,
+                             "declared": frames, "real": len(children)}
+            else:
+                raise ValueError
+        except (ValueError, IndexError):
+            malformed.append(line)
+    return grhs, malformed
+
+def resolve_grh_files(gid, grhs):
+    """
+    Sigue un Grh (y sus frames si es animación) y devuelve:
+    (set de archivos .png que usa, set de Grh referenciados que no existen).
+    """
+    files, broken, seen, stack = set(), set(), set(), [gid]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        g = grhs.get(cur)
+        if g is None:
+            broken.add(cur)
+        elif g["kind"] == "static":
+            if g["file"] > 0:
+                files.add(g["file"])
+        else:
+            stack.extend(g["children"])
+    return files, broken
+
+def find_broken_animations(grhs):
+    """Devuelve (animaciones con frames inexistentes, animaciones con cantidad de frames incorrecta)."""
+    broken, bad_counts = [], []
+    for gid in sorted(grhs):
+        g = grhs[gid]
+        if g["kind"] != "anim":
+            continue
+        gone = [c for c in g["children"] if c not in grhs]
+        if gone:
+            broken.append((gid, gone))
+        if g["real"] != g["declared"]:
+            bad_counts.append((gid, g["declared"], g["real"]))
+    return broken, bad_counts
+
 # --- COMPONENTES DE UI ---
 
 def hero(title, description):
@@ -251,59 +321,179 @@ elif mode == PAGES["escaner"]:
 # --- 2. DIAGNÓSTICO ---
 elif mode == PAGES["diag"]:
     hero("🚑 2. Diagnóstico de salud",
-         "Compara los gráficos que <b>tu carpeta tiene</b> contra los que <b>el índice pide</b>. "
-         "Te avisa qué falta (puede cerrar el juego) y qué sobra (ocupa lugar sin usarse).")
+         "Revisa que tus gráficos y objetos estén bien conectados. "
+         "Detecta <b>imágenes que faltan</b> (el juego se puede cerrar), <b>animaciones rotas</b>, "
+         "<b>archivos que sobran</b> y <b>objetos invisibles</b>.")
 
     st.markdown("##### Archivos necesarios")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         ind = file_slot("ind_file", "Graficos.ini", ["ini", "txt", "ind"],
                         "El índice de gráficos del cliente (texto con líneas Grh1=...).")
     with c2:
         lst = file_slot("list_file", "lista_graficos.txt", ["txt"],
-                        "Generado en el paso 1 (Escanear carpeta).")
+                        "Generado en el paso 1 (Escanear carpeta). Opcional para la pestaña de objetos.")
+    with c3:
+        obj = file_slot("obj_file", "OBJ.DAT", ["dat", "txt"],
+                        "Solo para la pestaña «Objetos». Es el mismo que usa el Editor de objetos.")
 
-    if not (ind and lst):
-        st.info("👆 Subí los dos archivos para ver el resultado. "
-                "Si no tenés `lista_graficos.txt`, andá a **1. Escanear carpeta**.")
-    else:
-        needed, _ = parse_ind_data(ind)
-        disk = parse_disk_files(lst)
-        missing = sorted(needed - disk)
-        orphans = sorted(disk - needed)
+    tab_graf, tab_obj = st.tabs(["🖼️ Gráficos", "⚔️ Objetos vs. índice"])
 
-        st.divider()
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Gráficos que pide el índice", len(needed))
-        m2.metric("Imágenes en tu carpeta", len(disk))
-        m3.metric("Problemas encontrados", len(missing) + len(orphans))
+    # ---------- Pestaña 1: Gráficos ----------
+    with tab_graf:
+        if not (ind and lst):
+            st.info("👆 Subí `Graficos.ini` y `lista_graficos.txt` para ver el resultado. "
+                    "Si no tenés la lista, andá a **1. Escanear carpeta**.")
+        else:
+            grhs, malformed = analyze_grh_index(ind)
+            needed, _ = parse_ind_data(ind)
+            disk = parse_disk_files(lst)
+            missing = sorted(needed - disk)
+            orphans = sorted(disk - needed)
+            broken_anims, bad_counts = find_broken_animations(grhs)
 
-        col_miss, col_clean = st.columns(2)
+            # Grh afectados por cada imagen que falta
+            affected = {}
+            for gid, g in grhs.items():
+                if g["kind"] == "static" and g["file"] in missing:
+                    affected.setdefault(g["file"], []).append(gid)
+            anims_hit = {}
+            for gid, g in grhs.items():
+                if g["kind"] == "anim":
+                    files, _ = resolve_grh_files(gid, grhs)
+                    gone = sorted(f for f in files if f in missing)
+                    if gone:
+                        anims_hit[gid] = gone
 
-        with col_miss:
-            st.subheader("⛔ Faltantes")
-            st.caption("El índice las pide pero no están en tu carpeta. **Es lo urgente**: pueden cerrar el juego.")
-            if missing:
-                st.error(f"Faltan {len(missing)} archivos")
-                text_missing = "\n".join(f"{x}.png" for x in missing)
-                st.text_area("Lista:", text_missing, height=200, key="ta_missing")
-                st.download_button("⬇️ Descargar lista de faltantes", text_missing, "faltantes.txt")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Gráficos que pide el índice", len(needed))
+            m2.metric("Imágenes en tu carpeta", len(disk))
+            m3.metric("⛔ Faltantes", len(missing))
+            m4.metric("🔗 Animaciones rotas", len(broken_anims))
+
+            st.divider()
+            col_miss, col_clean = st.columns(2)
+
+            with col_miss:
+                st.subheader("⛔ Imágenes faltantes")
+                st.caption("El índice las pide pero no están en tu carpeta. **Es lo urgente**: pueden cerrar el juego.")
+                if missing:
+                    st.error(f"Faltan {len(missing)} archivos")
+                    text_missing = "\n".join(f"{x}.png" for x in missing)
+                    st.text_area("Lista:", text_missing, height=180, key="ta_missing")
+                    st.download_button("⬇️ Descargar lista de faltantes", text_missing, "faltantes.txt")
+                    with st.expander("¿Qué Grh se rompen por estas faltantes?"):
+                        detail = "\n".join(
+                            f"{f}.png  →  " + ", ".join(f"Grh{g}" for g in sorted(gs))
+                            for f, gs in sorted(affected.items()))
+                        st.text(detail)
+                        if anims_hit:
+                            st.markdown("**Animaciones afectadas:**")
+                            st.text("\n".join(
+                                f"Grh{g}  (le faltan: " + ", ".join(f"{f}.png" for f in fs) + ")"
+                                for g, fs in sorted(anims_hit.items())))
+                else:
+                    st.success("¡No falta nada! El cliente va a cargar bien.")
+
+            with col_clean:
+                st.subheader("🧹 Huérfanos")
+                st.caption("Están en tu carpeta pero ningún gráfico los usa. Podés borrarlos para ahorrar espacio (opcional).")
+                if orphans:
+                    st.warning(f"Sobran {len(orphans)} archivos")
+                    text_orphans = "\n".join(f"{x}.png" for x in orphans)
+                    st.text_area("Lista:", text_orphans, height=180, key="ta_orphans")
+                    st.download_button("⬇️ Descargar lista de huérfanos", text_orphans, "huerfanos.txt")
+                else:
+                    st.success("Carpeta optimizada al 100%.")
+
+            st.divider()
+            st.subheader("🔗 Animaciones y líneas del índice")
+            st.caption("Una animación es un Grh con varios frames (`Grh100=4-101-102-103-104-0.5`): "
+                       "cada número del medio es **otro Grh** que debe existir en el índice.")
+            if not (broken_anims or bad_counts or malformed):
+                st.success("Todas las animaciones apuntan a Grh existentes y el índice no tiene líneas dañadas.")
+            if broken_anims:
+                st.error(f"{len(broken_anims)} animaciones apuntan a un Grh que NO existe")
+                st.text("\n".join(f"Grh{g}  →  falta Grh" + ", Grh".join(str(m) for m in ms)
+                                  for g, ms in broken_anims))
+            if bad_counts:
+                st.warning(f"{len(bad_counts)} animaciones con cantidad de frames incorrecta")
+                st.text("\n".join(f"Grh{g}  declara {decl} frames pero tiene {real}"
+                                  for g, decl, real in bad_counts))
+            if malformed:
+                st.warning(f"{len(malformed)} líneas del índice no se pudieron interpretar")
+                st.text("\n".join(malformed[:100]))
+
+    # ---------- Pestaña 2: Objetos ----------
+    with tab_obj:
+        st.markdown("Revisa que el **gráfico de cada objeto** exista. Un objeto con gráfico roto se ve invisible en el juego.")
+        if not (ind and obj):
+            st.info("👆 Subí `Graficos.ini` y `OBJ.DAT` para revisar los objetos. "
+                    "Si además subís `lista_graficos.txt`, también se verifica que la imagen exista en tu carpeta.")
+        else:
+            try:
+                from obj_handler import ObjDatHandler
+                handler = ObjDatHandler()
+                handler.parse(obj)
+            except Exception as e:
+                st.error(f"No se pudo leer el OBJ.DAT: {e}")
+                st.stop()
+
+            grhs, _ = analyze_grh_index(ind)
+            disk = parse_disk_files(lst) if lst else None
+
+            no_grh, grh_missing, file_missing, ok = [], [], [], 0
+            for oid in sorted(handler.objects):
+                o = handler.objects[oid]
+                name = o.get("Name", o.get("name", "Sin nombre"))
+                try:
+                    gi = int(o.get("GrhIndex", 0) or 0)
+                except ValueError:
+                    gi = -1
+                if gi == 0:
+                    no_grh.append((oid, name))
+                elif gi not in grhs:
+                    grh_missing.append((oid, name, gi))
+                else:
+                    files, broken = resolve_grh_files(gi, grhs)
+                    gone = sorted(f for f in files if disk is not None and f not in disk)
+                    if broken:
+                        grh_missing.append((oid, name, gi))
+                    elif gone:
+                        file_missing.append((oid, name, gi, gone))
+                    else:
+                        ok += 1
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Objetos revisados", len(handler.objects))
+            m2.metric("✅ Correctos", ok)
+            m3.metric("⛔ Grh inexistente", len(grh_missing))
+            m4.metric("🖼️ Imagen faltante", len(file_missing) if disk is not None else "—")
+
+            st.divider()
+            if grh_missing:
+                st.error(f"{len(grh_missing)} objetos apuntan a un Grh que no existe en el índice (se ven invisibles)")
+                txt = "\n".join(f"OBJ{o} · {n}  →  GrhIndex={g}" for o, n, g in grh_missing)
+                st.text_area("Detalle:", txt, height=180, key="ta_obj_grh")
+                st.download_button("⬇️ Descargar reporte", txt, "objetos_grh_inexistente.txt")
             else:
-                st.success("¡No falta nada! El cliente va a cargar bien.")
+                st.success("Todos los objetos con gráfico apuntan a un Grh que existe en el índice.")
 
-        with col_clean:
-            st.subheader("🧹 Huérfanos")
-            st.caption("Están en tu carpeta pero ningún gráfico los usa. Podés borrarlos para ahorrar espacio (opcional).")
-            if orphans:
-                st.warning(f"Sobran {len(orphans)} archivos")
-                text_orphans = "\n".join(f"{x}.png" for x in orphans)
-                st.text_area("Lista:", text_orphans, height=200, key="ta_orphans")
-                st.download_button("⬇️ Descargar lista de huérfanos", text_orphans, "huerfanos.txt")
+            if disk is None:
+                st.info("Subí `lista_graficos.txt` para verificar también que las imágenes existan en tu carpeta.")
+            elif file_missing:
+                st.error(f"{len(file_missing)} objetos tienen Grh válido pero les falta la imagen en tu carpeta")
+                txt = "\n".join(f"OBJ{o} · {n}  →  Grh{g}  (falta " + ", ".join(f"{f}.png" for f in fs) + ")"
+                                for o, n, g, fs in file_missing)
+                st.text_area("Detalle:", txt, height=180, key="ta_obj_file")
+                st.download_button("⬇️ Descargar reporte", txt, "objetos_imagen_faltante.txt")
             else:
-                st.success("Carpeta optimizada al 100%.")
+                st.success("Todas las imágenes de los objetos existen en tu carpeta.")
 
-        st.caption("ℹ️ Solo se revisan gráficos de 1 frame. Las animaciones usan otros Grh y no se verifican acá.")
-
+            if no_grh:
+                with st.expander(f"ℹ️ {len(no_grh)} objetos sin gráfico (GrhIndex = 0)"):
+                    st.caption("Puede ser normal (oro, ciertos objetos del sistema), pero revisá que no sea un olvido.")
+                    st.text("\n".join(f"OBJ{o} · {n}" for o, n in no_grh))
 
 # --- 3. NÚMEROS LIBRES ---
 elif mode == PAGES["nuevo"]:
@@ -529,6 +719,15 @@ elif mode == PAGES["editor"]:
                 st.rerun()
 
     # --- MAIN UI ---
+    if st.session_state.obj_data is None and st.session_state.get("obj_file"):
+        _h = ObjDatHandler()
+        try:
+            _h.parse(st.session_state["obj_file"]["data"])
+            st.session_state.obj_handler = _h
+            st.session_state.obj_data = _h.objects
+        except Exception:
+            pass
+
     if st.session_state.obj_data is None:
         uploaded_obj = st.file_uploader("① Subí tu OBJ.DAT", type=["dat", "txt"])
     else:
@@ -538,12 +737,14 @@ elif mode == PAGES["editor"]:
         if reset_c.button("Cargar otro archivo", use_container_width=True):
             st.session_state.obj_data = None
             st.session_state.obj_handler = None
+            st.session_state.pop("obj_file", None)
             st.rerun()
 
     if uploaded_obj and st.session_state.obj_data is None:
         handler = ObjDatHandler()
         try:
             handler.parse(uploaded_obj.getvalue())
+            st.session_state["obj_file"] = {"name": uploaded_obj.name, "data": uploaded_obj.getvalue()}
             st.session_state.obj_handler = handler
             st.session_state.obj_data = handler.objects
             st.success(f"¡Data cargada! ({len(handler.objects)} objetos)")
